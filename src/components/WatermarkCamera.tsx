@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { MIN_PIXELS, embed, verify, type VerifyResult } from "@/lib/watermark";
+import { MIN_PIXELS, TILE_CELLS, embed, verify, type Evidence, type VerifyResult } from "@/lib/watermark";
 
 const MAX_PIXELS = 16_000_000; // iOS Safari refuses canvases much larger than ~16.7 MP
 const FRESH_MS = 10 * 60 * 1000; // a photo straight from the camera has a just-now timestamp
@@ -25,11 +25,20 @@ const L = {
     loadFail: "사진을 읽지 못했어요.",
     yes: "이 앱으로 찍은 사진입니다",
     no: "이 앱으로 찍은 사진이 아닙니다",
-    noHint: "자르거나 크기를 줄인 사진, 메신저로 전송하며 줄어든 사진은 확인되지 않을 수 있어요.",
+    noHint: "아주 작게 줄었거나 일부만 남도록 많이 잘린 사진은 확인되지 않을 수 있어요.",
     at: "촬영 시각",
+    timeUnknown: "읽을 수 없음 (사진이 많이 작아짐)",
     state: "상태",
-    original: "원본 그대로",
-    copy: "압축·재저장된 사본",
+    original: "원본 파일 그대로",
+    copy: "전송·편집된 사본",
+    coverage: "무늬 확인 영역",
+    layer: "근거 표시",
+    legendOk: "앱 무늬가 읽힌 곳",
+    legendWeak: "무늬가 약하거나 없는 곳 — 아주 밝거나 어두운 곳, 또는 편집된 곳",
+    expected: "앱 고유 무늬",
+    read: "이 사진에서 읽은 무늬",
+    similarity: "일치도",
+    compareHint: "사진 전체에 반복된 무늬를 한 칸으로 겹쳐 모은 결과입니다.",
   },
   en: {
     title: "Watermark Camera",
@@ -49,11 +58,20 @@ const L = {
     loadFail: "Couldn't read the photo.",
     yes: "Taken with this app",
     no: "Not taken with this app",
-    noHint: "Cropped or resized photos (including ones shrunk by messengers) may not be recognized.",
+    noHint: "Photos shrunk to a tiny size or cropped down to a small part may not be recognized.",
     at: "Taken at",
+    timeUnknown: "Unreadable (photo shrunk a lot)",
     state: "State",
-    original: "Untouched original",
-    copy: "Compressed / re-saved copy",
+    original: "Untouched original file",
+    copy: "Sent / edited copy",
+    coverage: "Pattern found in",
+    layer: "Show evidence",
+    legendOk: "App pattern read here",
+    legendWeak: "Weak or missing — very bright/dark areas, or edited areas",
+    expected: "App pattern",
+    read: "Read from this photo",
+    similarity: "Match",
+    compareHint: "Every repeat of the pattern across the photo, stacked into one tile.",
   },
 };
 
@@ -63,7 +81,10 @@ const noop = () => () => {};
 const browserLocale = (): Locale => (navigator.language.toLowerCase().startsWith("ko") ? "ko" : "en");
 
 type Shot = { url: string; file: File; saved: boolean };
-type View = { kind: "home" } | { kind: "shot"; shot: Shot } | { kind: "check"; res: VerifyResult; url: string };
+type View =
+  | { kind: "home" }
+  | { kind: "shot"; shot: Shot }
+  | { kind: "check"; res: VerifyResult; url: string; w: number; h: number };
 
 const isAndroid = () => /android/i.test(navigator.userAgent);
 const stamp = (d: Date) => {
@@ -170,7 +191,7 @@ export default function WatermarkCamera() {
       g.drawImage(bmp, 0, 0);
       bmp.close();
       const res = verify(g.getImageData(0, 0, c.width, c.height));
-      setView({ kind: "check", res, url: URL.createObjectURL(f) });
+      setView({ kind: "check", res, url: URL.createObjectURL(f), w: c.width, h: c.height });
     } catch {
       setError(t.loadFail);
     } finally {
@@ -184,7 +205,7 @@ export default function WatermarkCamera() {
   };
 
   const fmtTime = (d: Date) =>
-    d.toLocaleString(locale === "ko" ? "ko-KR" : "en-US", { dateStyle: "medium", timeStyle: "medium" });
+    d.toLocaleString(locale === "ko" ? "ko-KR" : "en-US", { dateStyle: "medium", timeStyle: "short" });
 
   const btn = "flex w-full items-center justify-center rounded-2xl px-4 font-bold transition active:scale-[0.98]";
   const primary = `${btn} bg-slate-900 py-4 text-base text-white`;
@@ -279,9 +300,7 @@ export default function WatermarkCamera() {
 
       {view.kind === "check" && (
         <div className="mt-5 flex flex-1 flex-col">
-          {/* eslint-disable-next-line @next/next/no-img-element -- local blob preview */}
-          <img src={view.url} alt="" className="max-h-[45dvh] w-full rounded-2xl border border-slate-200 object-contain" />
-          <Verdict res={view.res} t={t} fmt={fmtTime} />
+          <Verdict view={view} t={t} fmt={fmtTime} />
           <div className="mt-auto space-y-3 pt-6">
             {checkButton(t.check, primary)}
             <button onClick={() => setView({ kind: "home" })} className="w-full py-2 text-sm text-slate-500">
@@ -297,32 +316,150 @@ export default function WatermarkCamera() {
   );
 }
 
-function Verdict({ res, t, fmt }: { res: VerifyResult; t: (typeof L)["ko"]; fmt: (d: Date) => string }) {
-  const hit = res.pixel ?? res.robust;
-  // A JPEG copy can still leak enough low bits for a majority vote, but only the untouched file agrees ~100%.
-  const original = !!res.pixel && res.pixel.agreement > 0.98;
-  if (!hit)
-    return (
-      <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
-        <p className="flex items-center gap-2 text-lg font-black">
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-slate-400 text-sm text-white">✕</span>
-          {t.no}
-        </p>
-        <p className="mt-2 text-xs leading-relaxed text-slate-500">{t.noHint}</p>
-      </div>
-    );
+type Dict = (typeof L)["ko"];
+
+function Verdict({
+  view,
+  t,
+  fmt,
+}: {
+  view: Extract<View, { kind: "check" }>;
+  t: Dict;
+  fmt: (d: Date) => string;
+}) {
+  const { res } = view;
+  const ev = res.evidence;
+  const [layer, setLayer] = useState(true);
   return (
-    <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-      <p className="flex items-center gap-2 text-lg font-black text-emerald-900">
-        <span className="grid h-7 w-7 place-items-center rounded-full bg-emerald-600 text-sm text-white">✓</span>
-        {t.yes}
-      </p>
-      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm text-emerald-900">
-        <dt className="text-emerald-700">{t.at}</dt>
-        <dd className="font-bold">{fmt(hit.time)}</dd>
-        <dt className="text-emerald-700">{t.state}</dt>
-        <dd className="font-bold">{original ? t.original : t.copy}</dd>
-      </dl>
+    <div>
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
+        {/* eslint-disable-next-line @next/next/no-img-element -- local blob preview */}
+        <img src={view.url} alt="" className="block w-full" />
+        {ev && res.found && layer && <Overlay ev={ev} w={view.w} h={view.h} />}
+      </div>
+      {ev && res.found && (
+        <div className="mt-2 flex items-start justify-between gap-3">
+          <div className="space-y-1 text-[11px] leading-snug text-slate-500">
+            <p className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-emerald-500/70" />
+              {t.legendOk}
+            </p>
+            <p className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-rose-500/40" />
+              {t.legendWeak}
+            </p>
+          </div>
+          <label className="flex shrink-0 items-center gap-1.5 text-xs font-bold text-slate-600">
+            <input type="checkbox" checked={layer} onChange={(e) => setLayer(e.target.checked)} className="accent-emerald-600" />
+            {t.layer}
+          </label>
+        </div>
+      )}
+
+      {res.found ? (
+        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+          <p className="flex items-center gap-2 text-lg font-black text-emerald-900">
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-emerald-600 text-sm text-white">✓</span>
+            {t.yes}
+          </p>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm text-emerald-900">
+            <dt className="text-emerald-700">{t.at}</dt>
+            <dd className="font-bold">{res.time ? fmt(res.time) : t.timeUnknown}</dd>
+            <dt className="text-emerald-700">{t.state}</dt>
+            <dd className="font-bold">{res.original ? t.original : t.copy}</dd>
+            {ev && (
+              <>
+                <dt className="text-emerald-700">{t.coverage}</dt>
+                <dd className="font-bold">{Math.round(ev.coverage * 100)}%</dd>
+              </>
+            )}
+          </dl>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
+          <p className="flex items-center gap-2 text-lg font-black">
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-slate-400 text-sm text-white">✕</span>
+            {t.no}
+          </p>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">{t.noHint}</p>
+        </div>
+      )}
+
+      {ev && (
+        <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="grid grid-cols-2 gap-3 text-center text-xs font-bold text-slate-600">
+            <figure>
+              <PatternCanvas cells={ev.expected} />
+              <figcaption className="mt-1.5">{t.expected}</figcaption>
+            </figure>
+            <figure>
+              <PatternCanvas cells={ev.read} />
+              <figcaption className="mt-1.5">{t.read}</figcaption>
+            </figure>
+          </div>
+          <p className="mt-3 text-center text-sm">
+            {t.similarity}{" "}
+            <b className={res.found ? "text-emerald-700" : "text-slate-700"}>{Math.round(ev.similarity * 100)}%</b>
+          </p>
+          <p className="mt-1 text-center text-[11px] text-slate-400">{t.compareHint}</p>
+        </div>
+      )}
     </div>
   );
+}
+
+/** The app pattern drawn where it was read: green cells on tiles that matched, a rose wash where it was weak. */
+function Overlay({ ev, w, h }: { ev: Evidence; w: number; h: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const k = Math.min(1, 1400 / Math.max(w, h));
+    c.width = Math.round(w * k);
+    c.height = Math.round(h * k);
+    const g = c.getContext("2d")!;
+    g.clearRect(0, 0, c.width, c.height);
+    const N = TILE_CELLS;
+    const cw = (ev.tx / N) * k;
+    const ch = (ev.ty / N) * k;
+    for (let r = 0; r < ev.rows; r++)
+      for (let col = 0; col < ev.cols; col++) {
+        const z = ev.z[r * ev.cols + col];
+        if (Number.isNaN(z)) continue;
+        const X = (ev.gx0 + col * ev.tx) * k;
+        const Y = (ev.gy0 + r * ev.ty) * k;
+        if (z >= 3) {
+          g.fillStyle = `rgba(16,185,129,${Math.min(0.32, 0.14 + z / 80)})`;
+          for (let j = 0; j < N; j++)
+            for (let i = 0; i < N; i++)
+              if (ev.cells[j * N + i] > 0) g.fillRect(X + i * cw, Y + j * ch, cw + 0.3, ch + 0.3);
+          g.strokeStyle = "rgba(16,185,129,0.45)";
+          g.lineWidth = Math.max(1, c.width / 600);
+          g.strokeRect(X, Y, ev.tx * k, ev.ty * k);
+        } else {
+          g.fillStyle = "rgba(244,63,94,0.16)";
+          g.fillRect(X, Y, ev.tx * k, ev.ty * k);
+        }
+      }
+  }, [ev, w, h]);
+  return <canvas ref={ref} className="pointer-events-none absolute inset-0 h-full w-full" />;
+}
+
+function PatternCanvas({ cells }: { cells: Float32Array }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const N = TILE_CELLS;
+    c.width = N;
+    c.height = N;
+    const img = new ImageData(N, N);
+    for (let k = 0; k < N * N; k++) {
+      const v = Math.round(127.5 + 127.5 * Math.max(-1, Math.min(1, cells[k])));
+      img.data[k * 4] = img.data[k * 4 + 1] = img.data[k * 4 + 2] = v;
+      img.data[k * 4 + 3] = 255;
+    }
+    c.getContext("2d")!.putImageData(img, 0, 0);
+  }, [cells]);
+  return <canvas ref={ref} className="mx-auto aspect-square w-full max-w-36 rounded-lg [image-rendering:pixelated]" />;
 }
