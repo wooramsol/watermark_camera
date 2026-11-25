@@ -10,22 +10,22 @@
  *    of two interleaved grids (bit 0 / bit 1). JPEG keeps block averages (the DC coefficient) well, so this
  *    layer survives JPEG re-compression of the same-size image. It does not survive resizing or cropping.
  *
- * Both layers spread the bits with a keyed pseudo-random stream: without the key the bits look like noise,
- * and reading needs the same key. Decoding is a majority vote over every repetition, then a CRC32 check.
+ * Every photo from this app carries the same fixed pattern (no per-user key): the question answered is only
+ * "was this taken with this app?", plus when. Bits are scrambled with a fixed pseudo-random stream so the
+ * pattern looks like noise and ordinary photos don't match it. Decoding is a majority vote over every
+ * repetition, then a CRC32 check.
  *
- * Frame (FRAME_BYTES, fixed): [version 1B][text length 1B][unix seconds 4B][text MAX_TEXT_BYTES][crc32 4B]
+ * Frame (FRAME_BYTES, fixed): [version 1B][unix seconds 4B][crc32 4B]
  */
 
-export const VERSION = 1;
-export const MAX_TEXT_BYTES = 40;
-const FRAME_BYTES = 1 + 1 + 4 + MAX_TEXT_BYTES + 4;
+export const VERSION = 2;
+const FRAME_BYTES = 1 + 4 + 4;
 const FRAME_BITS = FRAME_BYTES * 8;
 const BLOCK = 8;
 const STEP = 4; // robust-layer quantisation step in brightness levels (max change ±2)
-export const DEFAULT_KEY = "watermark-camera";
+const SEED = 0x57a7e2c1; // fixed app-wide pattern seed — changing it orphans every photo taken before
 
-export type Payload = { text: string; time: Date };
-export type Decoded = Payload & { votes: number; agreement: number };
+export type Decoded = { time: Date; votes: number; agreement: number };
 export type VerifyResult = { pixel: Decoded | null; robust: Decoded | null };
 
 // ── helpers ──────────────────────────────────────────────────────────────────────────────────────────
@@ -46,14 +46,7 @@ function crc32(bytes: Uint8Array): number {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-/** 32-bit seed from the key string (FNV-1a). */
-function seedOf(key: string): number {
-  let h = 0x811c9dc5;
-  for (const b of new TextEncoder().encode(key || DEFAULT_KEY)) h = Math.imul(h ^ b, 0x01000193);
-  return h >>> 0;
-}
-
-/** Stateless keyed hash of an index → 32 bits (lowbias32 mixer). */
+/** Stateless seeded hash of an index → 32 bits (lowbias32 mixer). */
 function mix(i: number, seed: number): number {
   let x = (i ^ seed) >>> 0;
   x = Math.imul(x ^ (x >>> 16), 0x7feb352d);
@@ -61,35 +54,20 @@ function mix(i: number, seed: number): number {
   return (x ^ (x >>> 16)) >>> 0;
 }
 
-/** Trim a string so its UTF-8 form fits in `max` bytes without splitting a character. */
-export function fitText(text: string, max = MAX_TEXT_BYTES): string {
-  const enc = new TextEncoder();
-  let out = "";
-  for (const ch of text) {
-    if (enc.encode(out + ch).length > max) break;
-    out += ch;
-  }
-  return out;
-}
-
-function encodeFrame(p: Payload): Uint8Array {
-  const text = new TextEncoder().encode(fitText(p.text));
+function encodeFrame(time: Date): Uint8Array {
   const f = new Uint8Array(FRAME_BYTES);
   const dv = new DataView(f.buffer);
   f[0] = VERSION;
-  f[1] = text.length;
-  dv.setUint32(2, Math.floor(p.time.getTime() / 1000) >>> 0);
-  f.set(text, 6);
+  dv.setUint32(1, Math.floor(time.getTime() / 1000) >>> 0);
   dv.setUint32(FRAME_BYTES - 4, crc32(f.subarray(0, FRAME_BYTES - 4)));
   return f;
 }
 
-function decodeFrame(f: Uint8Array): Payload | null {
+function decodeFrame(f: Uint8Array): Date | null {
   const dv = new DataView(f.buffer, f.byteOffset, f.byteLength);
-  if (f[0] !== VERSION || f[1] > MAX_TEXT_BYTES) return null;
+  if (f[0] !== VERSION) return null;
   if (dv.getUint32(FRAME_BYTES - 4) !== crc32(f.subarray(0, FRAME_BYTES - 4))) return null;
-  const text = new TextDecoder("utf-8", { fatal: false }).decode(f.subarray(6, 6 + f[1]));
-  return { text, time: new Date(dv.getUint32(2) * 1000) };
+  return new Date(dv.getUint32(1) * 1000);
 }
 
 const frameBit = (f: Uint8Array, i: number) => (f[i >> 3] >> (7 - (i & 7))) & 1;
@@ -135,7 +113,7 @@ function readLsb(px: Uint8ClampedArray, seed: number): Decoded | null {
   }
   const { frame, agreement } = settle(tally, weight);
   const p = decodeFrame(frame);
-  return p ? { ...p, votes: Math.floor(n / FRAME_BITS), agreement } : null;
+  return p ? { time: p, votes: Math.floor(n / FRAME_BITS), agreement } : null;
 }
 
 // ── robust layer (8×8 block brightness QIM) ──────────────────────────────────────────────────────────
@@ -151,7 +129,7 @@ function blockMean(px: Uint8ClampedArray, w: number, bx: number, by: number) {
   return sum / (BLOCK * BLOCK);
 }
 
-/** Dither offset in [0, STEP) for block k — keyed so the grid position is secret. */
+/** Dither offset in [0, STEP) for block k — scrambles the grid so plain photos don't line up with it. */
 const dither = (k: number, s: number) => (mix(k, s) / 0x100000000) * STEP;
 
 function embedQim(px: Uint8ClampedArray, w: number, h: number, frame: Uint8Array, seed: number) {
@@ -201,33 +179,20 @@ function readQim(px: Uint8ClampedArray, w: number, h: number, seed: number): Dec
   }
   const { frame, agreement } = settle(tally, weight);
   const p = decodeFrame(frame);
-  return p ? { ...p, votes: Math.floor((bw * bh) / FRAME_BITS), agreement } : null;
+  return p ? { time: p, votes: Math.floor((bw * bh) / FRAME_BITS), agreement } : null;
 }
 
 // ── public API ───────────────────────────────────────────────────────────────────────────────────────
 
 /** Writes the watermark into RGBA pixels in place. Robust layer first, pixel layer last (it must stay exact). */
-export function embed(img: ImageData, payload: Payload, key = DEFAULT_KEY, robust = true) {
-  const frame = encodeFrame(payload);
-  const seed = seedOf(key);
-  if (robust) embedQim(img.data, img.width, img.height, frame, seed);
-  embedLsb(img.data, frame, seed);
+export function embed(img: ImageData, time: Date) {
+  const frame = encodeFrame(time);
+  embedQim(img.data, img.width, img.height, frame, SEED);
+  embedLsb(img.data, frame, SEED);
 }
 
-export function verify(img: ImageData, key = DEFAULT_KEY): VerifyResult {
-  const seed = seedOf(key);
-  return { pixel: readLsb(img.data, seed), robust: readQim(img.data, img.width, img.height, seed) };
-}
-
-/** Bit plane view: LSB of blue stretched to black/white, so the hidden noise pattern can be seen. */
-export function lsbPlane(img: ImageData): ImageData {
-  const out = new ImageData(img.width, img.height);
-  for (let o = 0; o < img.data.length; o += 4) {
-    const v = img.data[o + 2] & 1 ? 255 : 0;
-    out.data[o] = out.data[o + 1] = out.data[o + 2] = v;
-    out.data[o + 3] = 255;
-  }
-  return out;
+export function verify(img: ImageData): VerifyResult {
+  return { pixel: readLsb(img.data, SEED), robust: readQim(img.data, img.width, img.height, SEED) };
 }
 
 /** Smallest image that can carry a full frame in both layers (blocks are 8×8). */
