@@ -753,3 +753,8 @@ export function verify(img: ImageData): VerifyResult {
 }
 
 export const TILE_CELLS = N;
+
+/** One tile of the app pattern (N×N cells, ±1) as it is written for the given capture time — for illustrations. */
+export function tileCells(time: Date): Float32Array {
+  return cellValues(payloadBits(time));
+}

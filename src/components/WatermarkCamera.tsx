@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { MIN_PIXELS, TILE_CELLS, embed, verify, type Evidence, type VerifyResult } from "@/lib/watermark";
+import { MIN_PIXELS, TILE_CELLS, embed, tileCells, verify, type Evidence, type VerifyResult } from "@/lib/watermark";
 
 const MAX_PIXELS = 16_000_000; // iOS Safari refuses canvases much larger than ~16.7 MP
 const FRESH_MS = 10 * 60 * 1000; // a photo straight from the camera has a just-now timestamp
@@ -13,6 +13,9 @@ const L = {
     tagline: "AI 조작 걱정 없는 진짜 사진 인증",
     lead: "AI로 만든 가짜 사진이 늘고 있어요.\nNoFakeCam(위조방지 카메라)로 촬영한 사진은 눈에 보이지 않는 고유 무늬가 새겨져, 조작된 사진인지 바로 확인할 수 있습니다.",
     cta: "촬영해보고 검증해보세요!",
+    sampleBadge: "고유 무늬",
+    sampleCaption: "눈에 보이지 않는 무늬를 확대해 표시한 견본이에요.",
+    sampleTry: "눌러서 견본 검증해보기 →",
     usesTitle: "이럴 때 쓰세요",
     uses: [
       ["중고거래", "실물 인증"],
@@ -56,6 +59,9 @@ const L = {
     tagline: "Prove your photo is real — even in the age of AI fakes",
     lead: "AI-made fake photos are on the rise.\nPhotos taken with NoFakeCam carry a unique invisible pattern, so you can instantly check whether a photo has been tampered with.",
     cta: "Take a photo and verify it yourself!",
+    sampleBadge: "Hidden pattern",
+    sampleCaption: "A sample with the invisible pattern magnified so you can see it.",
+    sampleTry: "Tap to verify the sample →",
     usesTitle: "Great for",
     uses: [
       ["Marketplace", "Real item proof"],
@@ -96,6 +102,9 @@ const L = {
 };
 
 type Locale = keyof typeof L;
+
+const SAMPLE_URL = "/sample.jpg"; // CC0 photo (Rachel Michetti, via scikit-image) watermarked by this app
+const SAMPLE_TIME = new Date("2026-11-27T05:00:00Z");
 
 const USE_STYLE = ["border-sky-100 bg-sky-50", "border-amber-100 bg-amber-50", "border-emerald-100 bg-emerald-50"];
 const noop = () => () => {};
@@ -149,6 +158,10 @@ export default function WatermarkCamera() {
   const cameraRef = useRef<HTMLInputElement>(null);
 
   const viewUrl = view.kind === "shot" ? view.shot.url : view.kind === "check" ? view.url : null;
+  // Each screen starts at the top (the sample is tapped from further down the home screen).
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [view.kind, viewUrl]);
   useEffect(
     () => () => {
       if (viewUrl) URL.revokeObjectURL(viewUrl);
@@ -195,6 +208,16 @@ export default function WatermarkCamera() {
       setError(e instanceof Error && e.message ? e.message : t.loadFail);
     } finally {
       setBusy(null);
+    }
+  };
+
+  /** Verify the bundled sample photo (watermarked with this app) so the check screen can be tried right away. */
+  const checkSample = async () => {
+    try {
+      const blob = await (await fetch(SAMPLE_URL)).blob();
+      await runCheck(new File([blob], "NoFakeCam_sample.jpg", { type: blob.type }));
+    } catch {
+      setError(t.loadFail);
     }
   };
 
@@ -287,6 +310,14 @@ export default function WatermarkCamera() {
           <p className="mt-2 text-base font-bold text-slate-800">{t.tagline}</p>
           <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-600">{t.lead}</p>
           <p className="mt-3 text-sm font-bold text-emerald-700">{t.cta}</p>
+          <button
+            onClick={checkSample}
+            disabled={!!busy}
+            className="mt-4 block w-full overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition active:scale-[0.99]"
+          >
+            <SamplePreview badge={t.sampleBadge} cta={t.sampleTry} />
+            <span className="block px-3.5 py-2 text-[11px] text-slate-500">{t.sampleCaption}</span>
+          </button>
           <p className="mt-5 text-xs font-bold text-slate-500">{t.usesTitle}</p>
           <ul className="mt-2 grid grid-cols-3 gap-2">
             {t.uses.map(([h, d], i) => (
@@ -506,4 +537,41 @@ function PatternCanvas({ cells }: { cells: Float32Array }) {
     c.getContext("2d")!.putImageData(img, 0, 0);
   }, [cells]);
   return <canvas ref={ref} className="mx-auto aspect-square w-full max-w-36 rounded-lg [image-rendering:pixelated]" />;
+}
+
+/**
+ * Home-screen sample: the real watermarked sample photo, with the app pattern drawn on top and slowly swept in
+ * and out. The real cells are 1/256 of the photo — far too fine to see — so they are drawn magnified.
+ */
+function SamplePreview({ badge, cta }: { badge: string; cta: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const N = TILE_CELLS;
+    const cells = tileCells(SAMPLE_TIME);
+    const cell = 6; // canvas px per cell
+    const tilesX = 4;
+    c.width = N * cell * tilesX;
+    c.height = Math.round((c.width * 2) / 3);
+    const g = c.getContext("2d")!;
+    g.fillStyle = "rgba(16,185,129,0.62)";
+    for (let y = 0; y * cell < c.height; y++)
+      for (let x = 0; x * cell < c.width; x++)
+        if (cells[(y % N) * N + (x % N)] > 0) g.fillRect(x * cell, y * cell, cell, cell);
+  }, []);
+  return (
+    <span className="relative block aspect-[3/2] w-full bg-slate-100">
+      {/* eslint-disable-next-line @next/next/no-img-element -- small static sample, no optimisation needed */}
+      <img src={SAMPLE_URL} alt="" className="absolute inset-0 h-full w-full object-cover" />
+      <canvas ref={ref} className="sample-reveal pointer-events-none absolute inset-0 h-full w-full" />
+      <span className="sample-line pointer-events-none absolute inset-y-0 w-0.5 bg-white/90 shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
+      <span className="absolute top-2.5 left-2.5 rounded-full bg-emerald-600/90 px-2.5 py-1 text-[11px] font-bold text-white">
+        ✓ {badge}
+      </span>
+      <span className="absolute right-2.5 bottom-2.5 rounded-full bg-slate-900/85 px-3 py-1.5 text-xs font-bold text-white backdrop-blur">
+        {cta}
+      </span>
+    </span>
+  );
 }
