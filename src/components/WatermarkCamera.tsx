@@ -10,8 +10,7 @@ const L = {
   ko: {
     title: "위조방지 카메라",
     tagline: "AI 조작 걱정 없는 진짜 사진 인증",
-    lead: "AI로 만든 가짜 사진이 늘고 있어요.\nNoFakeCam(위조방지 카메라)로 촬영한 사진은 눈에 보이지 않는 고유 무늬가 새겨져, 조작된 사진인지 바로 확인할 수 있습니다.",
-    cta: "촬영해보고 검증해보세요!",
+    lead: "AI로 만든 가짜 사진이 늘고 있어요.\n촬영한 사진은 눈에 보이지 않는 고유 무늬가 새겨져, 조작된 사진인지 바로 확인할 수 있습니다.",
     sampleBadge: "고유 무늬 (확대 표시)",
     sampleTry: "눌러서 견본 검증해보기 →",
     usesTitle: "이럴 때 쓰세요",
@@ -22,7 +21,7 @@ const L = {
     ],
     privacy: "사진은 저장되지 않고 휴대폰 안에서만 처리돼요.",
     shoot: "촬영하기",
-    check: "사진 확인하기",
+    check: "검증하기",
     working: "워터마크 넣는 중…",
     checking: "확인하는 중…",
     saveIos: "앨범에 저장",
@@ -54,8 +53,7 @@ const L = {
   en: {
     title: "NoFakeCam",
     tagline: "Prove your photo is real — even in the age of AI fakes",
-    lead: "AI-made fake photos are on the rise.\nPhotos taken with NoFakeCam carry a unique invisible pattern, so you can instantly check whether a photo has been tampered with.",
-    cta: "Take a photo and verify it yourself!",
+    lead: "AI-made fake photos are on the rise.\nPhotos you take carry a unique invisible pattern, so you can instantly check whether a photo has been tampered with.",
     sampleBadge: "Hidden pattern (magnified)",
     sampleTry: "Tap to verify the sample →",
     usesTitle: "Great for",
@@ -66,7 +64,7 @@ const L = {
     ],
     privacy: "Photos are never stored — everything is processed on your phone.",
     shoot: "Take photo",
-    check: "Check a photo",
+    check: "Verify",
     working: "Adding watermark…",
     checking: "Checking…",
     saveIos: "Save to Photos",
@@ -266,7 +264,11 @@ export default function WatermarkCamera() {
     />
   );
   const checkButton = (label: string, cls: string) => (
-    <label className={`${cls} cursor-pointer`}>
+    <label className={`${cls} cursor-pointer gap-1.5`}>
+      <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden>
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-4-4" />
+      </svg>
       {label}
       <input
         type="file"
@@ -302,7 +304,6 @@ export default function WatermarkCamera() {
         <>
           <p className="mt-2 text-base font-bold text-slate-800">{t.tagline}</p>
           <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-600">{t.lead}</p>
-          <p className="mt-3 text-sm font-bold text-emerald-700">{t.cta}</p>
           <button
             onClick={checkSample}
             disabled={!!busy}
@@ -577,7 +578,7 @@ function SamplePreview({ badge, cta }: { badge: string; cta: string }) {
     const cell = 6; // canvas px per cell
     const tilesX = 4;
     c.width = N * cell * tilesX;
-    c.height = Math.round(c.width / 2);
+    c.height = Math.round((c.width * 2) / 3);
     const g = c.getContext("2d")!;
     g.fillStyle = "rgba(16,185,129,0.62)";
     for (let y = 0; y * cell < c.height; y++)
@@ -585,7 +586,7 @@ function SamplePreview({ badge, cta }: { badge: string; cta: string }) {
         if (cells[(y % N) * N + (x % N)] > 0) g.fillRect(x * cell, y * cell, cell, cell);
   }, []);
   return (
-    <span className="relative block aspect-[2/1] w-full bg-slate-100">
+    <span className="relative block aspect-[3/2] w-full bg-slate-100">
       {/* eslint-disable-next-line @next/next/no-img-element -- small static sample, no optimisation needed */}
       <img src={SAMPLE_URL} alt="" className="absolute inset-0 h-full w-full object-cover" />
       <canvas
