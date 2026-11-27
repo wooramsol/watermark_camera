@@ -8,13 +8,11 @@ const FRESH_MS = 10 * 60 * 1000; // a photo straight from the camera has a just-
 
 const L = {
   ko: {
-    brand: "NoFakeCam",
     title: "위조방지 카메라",
     tagline: "AI 조작 걱정 없는 진짜 사진 인증",
     lead: "AI로 만든 가짜 사진이 늘고 있어요.\nNoFakeCam(위조방지 카메라)로 촬영한 사진은 눈에 보이지 않는 고유 무늬가 새겨져, 조작된 사진인지 바로 확인할 수 있습니다.",
     cta: "촬영해보고 검증해보세요!",
-    sampleBadge: "고유 무늬",
-    sampleCaption: "눈에 보이지 않는 무늬를 확대해 표시한 견본이에요.",
+    sampleBadge: "고유 무늬 (확대 표시)",
     sampleTry: "눌러서 견본 검증해보기 →",
     usesTitle: "이럴 때 쓰세요",
     uses: [
@@ -54,13 +52,11 @@ const L = {
     compareHint: "사진 전체에 반복된 무늬를 한 칸으로 겹쳐 모은 결과입니다.",
   },
   en: {
-    brand: "위조방지 카메라",
     title: "NoFakeCam",
     tagline: "Prove your photo is real — even in the age of AI fakes",
     lead: "AI-made fake photos are on the rise.\nPhotos taken with NoFakeCam carry a unique invisible pattern, so you can instantly check whether a photo has been tampered with.",
     cta: "Take a photo and verify it yourself!",
-    sampleBadge: "Hidden pattern",
-    sampleCaption: "A sample with the invisible pattern magnified so you can see it.",
+    sampleBadge: "Hidden pattern (magnified)",
     sampleTry: "Tap to verify the sample →",
     usesTitle: "Great for",
     uses: [
@@ -285,12 +281,9 @@ export default function WatermarkCamera() {
   );
 
   return (
-    <section className="mx-auto flex min-h-dvh max-w-md flex-col px-5 pt-8 pb-10 break-keep">
+    <section className="mx-auto flex min-h-dvh max-w-md flex-col px-5 pt-6 pb-4 break-keep">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-bold tracking-wide text-emerald-700">{t.brand}</p>
-          <h1 className="mt-0.5 text-[26px] font-black tracking-tight min-[375px]:text-3xl">{t.title}</h1>
-        </div>
+        <h1 className="text-[26px] font-black tracking-tight min-[375px]:text-3xl">{t.title}</h1>
         <div className="flex shrink-0 rounded-lg border border-slate-200 bg-white p-0.5 text-xs font-bold">
           {(["ko", "en"] as const).map((l) => (
             <button
@@ -316,7 +309,6 @@ export default function WatermarkCamera() {
             className="mt-4 block w-full overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition active:scale-[0.99]"
           >
             <SamplePreview badge={t.sampleBadge} cta={t.sampleTry} />
-            <span className="block px-3.5 py-2 text-[11px] text-slate-500">{t.sampleCaption}</span>
           </button>
           <p className="mt-5 text-xs font-bold text-slate-500">{t.usesTitle}</p>
           <ul className="mt-2 grid grid-cols-3 gap-2">
@@ -335,15 +327,15 @@ export default function WatermarkCamera() {
             {t.privacy}
           </p>
           {/* Pinned to the bottom so the shutter is on the first screen even on small phones. */}
-          <div className="sticky bottom-0 -mx-5 mt-auto space-y-3 bg-slate-50/95 px-5 pt-4 pb-5 backdrop-blur">
-            <button onClick={() => cameraRef.current?.click()} disabled={!!busy} className={`${primary} gap-2 py-6 text-lg`}>
-              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+          <div className="sticky bottom-0 -mx-5 mt-auto grid grid-cols-2 gap-2.5 bg-slate-50/95 px-5 pt-3 pb-4 backdrop-blur">
+            <button onClick={() => cameraRef.current?.click()} disabled={!!busy} className={`${primary} gap-1.5`}>
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
                 <path d="M4 7h3l2-3h6l2 3h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z" />
                 <circle cx="12" cy="13" r="4" />
               </svg>
               {t.shoot}
             </button>
-            {!busy && checkButton(t.check, ghost)}
+            {checkButton(t.check, `${ghost} py-4 text-base ${busy ? "pointer-events-none opacity-40" : ""}`)}
           </div>
         </>
       )}
@@ -585,7 +577,7 @@ function SamplePreview({ badge, cta }: { badge: string; cta: string }) {
     const cell = 6; // canvas px per cell
     const tilesX = 4;
     c.width = N * cell * tilesX;
-    c.height = Math.round((c.width * 2) / 3);
+    c.height = Math.round(c.width / 2);
     const g = c.getContext("2d")!;
     g.fillStyle = "rgba(16,185,129,0.62)";
     for (let y = 0; y * cell < c.height; y++)
@@ -593,7 +585,7 @@ function SamplePreview({ badge, cta }: { badge: string; cta: string }) {
         if (cells[(y % N) * N + (x % N)] > 0) g.fillRect(x * cell, y * cell, cell, cell);
   }, []);
   return (
-    <span className="relative block aspect-[3/2] w-full bg-slate-100">
+    <span className="relative block aspect-[2/1] w-full bg-slate-100">
       {/* eslint-disable-next-line @next/next/no-img-element -- small static sample, no optimisation needed */}
       <img src={SAMPLE_URL} alt="" className="absolute inset-0 h-full w-full object-cover" />
       <canvas
