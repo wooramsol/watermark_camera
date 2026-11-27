@@ -8,8 +8,17 @@ const FRESH_MS = 10 * 60 * 1000; // a photo straight from the camera has a just-
 
 const L = {
   ko: {
-    title: "워터마크 카메라",
-    lead: "이 앱으로 찍은 사진에는 눈에 보이지 않는 표시가 픽셀 속에 새겨집니다.\n나중에 어떤 사진이든 이 앱으로 찍은 것인지 확인할 수 있어요.",
+    brand: "NoFakeCam",
+    title: "위조방지 카메라",
+    tagline: "AI 조작 걱정 없는 진짜 사진 인증",
+    lead: "AI로 만든 가짜 사진이 늘고 있어요. 위조방지 카메라로 찍은 사진에는 눈에 보이지 않는 고유 무늬가 새겨져, 카톡·문자로 보내거나 잘라도 진짜 사진인지 확인할 수 있습니다.",
+    steps: [
+      ["촬영", "찍는 순간 눈에 보이지 않는 무늬가 사진 전체에 새겨져요."],
+      ["공유", "카톡·문자로 보내거나 크기를 줄이고 잘라도 무늬가 남아요."],
+      ["확인", "이 앱으로 찍은 진짜 사진인지, 언제 찍었는지 보여줘요. 편집된 부분은 무늬가 비어 보여요."],
+    ],
+    uses: "중고거래 실물 인증 · 현장·사고 사진 · 인증샷",
+    privacy: "사진은 서버로 전송되지 않고 휴대폰 안에서만 처리돼요.",
     shoot: "촬영하기",
     check: "사진 확인하기",
     working: "워터마크 넣는 중…",
@@ -41,8 +50,17 @@ const L = {
     compareHint: "사진 전체에 반복된 무늬를 한 칸으로 겹쳐 모은 결과입니다.",
   },
   en: {
-    title: "Watermark Camera",
-    lead: "Photos taken with this app carry an invisible mark inside their pixels.\nLater you can check whether any photo was taken with this app.",
+    brand: "위조방지 카메라",
+    title: "NoFakeCam",
+    tagline: "Prove your photo is real — even in the age of AI fakes",
+    lead: "AI-made fake photos are everywhere. Photos taken with NoFakeCam carry an invisible pattern, so anyone can check they're real — even after being sent through a messenger or cropped.",
+    steps: [
+      ["Shoot", "An invisible pattern is written across the whole photo as you take it."],
+      ["Share", "It survives messengers, resizing and cropping."],
+      ["Check", "See whether a photo was taken with this app and when. Edited areas show up as gaps in the pattern."],
+    ],
+    uses: "Marketplace listings · On-site & accident photos · Proof shots",
+    privacy: "Photos never leave your phone — nothing is uploaded.",
     shoot: "Take photo",
     check: "Check a photo",
     working: "Adding watermark…",
@@ -160,7 +178,7 @@ export default function WatermarkCamera() {
       g.putImageData(img, 0, 0);
       // PNG keeps every pixel exactly, so the pixel layer survives in the album.
       const blob = await new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error())), "image/png"));
-      const file = new File([blob], `WMC_${stamp(when)}.png`, { type: "image/png" });
+      const file = new File([blob], `NoFakeCam_${stamp(when)}.png`, { type: "image/png" });
       const shot: Shot = { url: URL.createObjectURL(blob), file, saved: false };
       if (isAndroid()) {
         download(shot);
@@ -240,9 +258,12 @@ export default function WatermarkCamera() {
   );
 
   return (
-    <section className="mx-auto flex min-h-dvh max-w-md flex-col px-5 pt-8 pb-10">
+    <section className="mx-auto flex min-h-dvh max-w-md flex-col px-5 pt-8 pb-10 break-keep">
       <div className="flex items-start justify-between gap-4">
-        <h1 className="text-3xl font-black tracking-tight">{t.title}</h1>
+        <div>
+          <p className="text-xs font-bold tracking-wide text-emerald-700">{t.brand}</p>
+          <h1 className="mt-0.5 text-[26px] font-black tracking-tight min-[375px]:text-3xl">{t.title}</h1>
+        </div>
         <div className="flex shrink-0 rounded-lg border border-slate-200 bg-white p-0.5 text-xs font-bold">
           {(["ko", "en"] as const).map((l) => (
             <button
@@ -259,8 +280,30 @@ export default function WatermarkCamera() {
 
       {view.kind === "home" && (
         <>
-          <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-600">{t.lead}</p>
-          <div className="mt-auto space-y-3 pt-10">
+          <p className="mt-2 text-base font-bold text-slate-800">{t.tagline}</p>
+          <p className="mt-3 text-sm leading-relaxed text-slate-600">{t.lead}</p>
+          <ol className="mt-5 space-y-2.5">
+            {t.steps.map(([h, d], i) => (
+              <li key={h} className="flex gap-3">
+                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                  {i + 1}
+                </span>
+                <p className="text-sm leading-snug text-slate-600">
+                  <b className="text-slate-900">{h}</b> {d}
+                </p>
+              </li>
+            ))}
+          </ol>
+          <p className="mt-4 text-xs text-slate-500">{t.uses}</p>
+          <p className="mt-2 flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+              <rect x="5" y="11" width="14" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
+            {t.privacy}
+          </p>
+          {/* Pinned to the bottom so the shutter is on the first screen even on small phones. */}
+          <div className="sticky bottom-0 -mx-5 mt-auto space-y-3 bg-slate-50/95 px-5 pt-4 pb-5 backdrop-blur">
             <button onClick={() => cameraRef.current?.click()} disabled={!!busy} className={`${primary} gap-2 py-6 text-lg`}>
               <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
                 <path d="M4 7h3l2-3h6l2 3h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z" />

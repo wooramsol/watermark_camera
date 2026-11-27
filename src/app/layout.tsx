@@ -1,9 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
+const title = "NoFakeCam 위조방지 카메라 — AI 조작 걱정 없는 진짜 사진 인증";
+const description =
+  "찍는 순간 눈에 보이지 않는 무늬를 사진에 새겨, 카톡·문자로 보내거나 잘라도 진짜 사진인지 확인하는 조작 검증 카메라. 중고거래 실물 인증, 현장·사고 사진, 인증샷에. 사진은 서버로 전송되지 않습니다.";
+
 export const metadata: Metadata = {
-  title: "워터마크 카메라",
-  description: "찍는 순간 눈에 보이지 않는 워터마크를 사진 픽셀에 새기고, 나중에 확인하세요.",
+  title,
+  description,
+  applicationName: "NoFakeCam",
+  keywords: ["위조방지 카메라", "NoFakeCam", "사진 조작 확인", "조작 검증", "AI 사진 조작", "진짜 사진 인증", "인증샷", "실물 인증", "보이지 않는 워터마크"],
+  appleWebApp: { title: "NoFakeCam", capable: true },
+  openGraph: { type: "website", locale: "ko_KR", siteName: "NoFakeCam 위조방지 카메라", title, description },
 };
 
 export const viewport: Viewport = { themeColor: "#0f172a" };
