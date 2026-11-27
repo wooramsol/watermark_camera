@@ -29,3 +29,25 @@ npm run dev
 ```
 
 카메라(getUserMedia)는 HTTPS 또는 localhost에서만 동작합니다.
+
+## iOS 앱 (Capacitor)
+
+웹과 같은 코드(`out/` 정적 빌드)를 앱에 넣고, 앱에서만 두 가지가 달라집니다.
+
+- [촬영하기] → 앱 안 전체 화면 카메라(`@capacitor-community/camera-preview`). 셔터를 누르면 "Use Photo" 확인 없이 바로 처리
+- 저장 → 사진 앱에 PNG 그대로 저장(`@capacitor-community/media`, 사진 추가 전용 권한). PNG라 앨범의 사진도 "원본 파일 그대로"로 검증됨
+
+Mac(Xcode 필요)에서:
+
+```bash
+git pull
+npm install
+npm run ios        # next build → cap sync ios → Xcode 열림
+```
+
+Xcode에서: 왼쪽 `App` 프로젝트 → `App` 타깃 → Signing & Capabilities → Team에 Apple ID 선택 → 상단 기기 목록에서 연결한 아이폰 선택 → ▶ 실행.
+처음 설치하면 아이폰 설정 › 일반 › VPN 및 기기 관리에서 개발자 앱을 신뢰해야 열립니다. 아이폰 설정 › 개인정보 보호 및 보안 › 개발자 모드도 켜야 합니다.
+
+- 앱 ID: `kr.nofakecam.app` (`capacitor.config.ts`) — 첫 스토어 제출 전까지 변경 가능
+- 권한 문구: `ios/App/App/Info.plist` (카메라, 사진 추가)
+- 웹 코드를 바꾼 뒤에는 `npm run cap:sync` 후 Xcode에서 다시 실행

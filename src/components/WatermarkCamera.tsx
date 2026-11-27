@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Capacitor } from "@capacitor/core";
 import { MIN_PIXELS, TILE_CELLS, embed, tileCells, verify, type Evidence, type VerifyResult } from "@/lib/watermark";
 
 const MAX_PIXELS = 16_000_000; // iOS Safari refuses canvases much larger than ~16.7 MP
@@ -27,6 +28,11 @@ const L = {
     saveIos: "앨범에 저장",
     saveIosHint: "공유 창에서 ‘이미지 저장’을 누르면 사진 앨범에 들어갑니다.",
     savedAndroid: "앨범에 저장했어요. (갤러리 › Download)",
+    savedApp: "사진 앱에 저장했어요.",
+    saveFail: "앨범에 저장하지 못했어요. 설정 › NoFakeCam에서 사진 추가 권한을 허용해 주세요.",
+    camFail: "카메라를 열 수 없어요. 설정 › NoFakeCam에서 카메라 권한을 허용해 주세요.",
+    close: "닫기",
+    flip: "전환",
     saveAgain: "다시 저장",
     again: "다시 촬영",
     home: "처음으로",
@@ -70,6 +76,11 @@ const L = {
     saveIos: "Save to Photos",
     saveIosHint: "Tap “Save Image” in the share sheet to put it in your photo library.",
     savedAndroid: "Saved to your gallery (Gallery › Download).",
+    savedApp: "Saved to Photos.",
+    saveFail: "Couldn't save to Photos. Allow adding photos in Settings › NoFakeCam.",
+    camFail: "Couldn't open the camera. Allow camera access in Settings › NoFakeCam.",
+    close: "Close",
+    flip: "Flip",
     saveAgain: "Save again",
     again: "Take another",
     home: "Back",
@@ -108,10 +119,27 @@ const browserLocale = (): Locale => (navigator.language.toLowerCase().startsWith
 type Shot = { url: string; file: File; saved: boolean };
 type View =
   | { kind: "home" }
+  | { kind: "camera" }
   | { kind: "shot"; shot: Shot }
   | { kind: "check"; res: VerifyResult; url: string; w: number; h: number };
 
 const isAndroid = () => /android/i.test(navigator.userAgent);
+/** True inside the iOS/Android app (Capacitor), false on the web. Server render assumes web. */
+const isNative = () => Capacitor.isNativePlatform();
+
+const blobToDataUrl = (b: Blob) =>
+  new Promise<string>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result as string);
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(b);
+  });
+
+/** App: write the PNG bytes straight into the photo library (add-only permission, no share sheet). */
+async function saveToLibrary(shot: Shot) {
+  const { Media } = await import("@capacitor-community/media");
+  await Media.savePhoto({ path: await blobToDataUrl(shot.file) });
+}
 const stamp = (d: Date) => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
@@ -163,6 +191,59 @@ export default function WatermarkCamera() {
     [viewUrl],
   );
 
+  /** Write the watermark into a photo and turn it into a lossless PNG. */
+  const watermark = async (src: Blob, when: Date): Promise<Shot> => {
+    const bmp = await createImageBitmap(src); // applies EXIF orientation
+    const s = Math.min(1, Math.sqrt(MAX_PIXELS / (bmp.width * bmp.height)));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * s);
+    c.height = Math.round(bmp.height * s);
+    if (c.width * c.height < MIN_PIXELS) throw new Error(t.tooSmall);
+    const g = ctx2d(c);
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close();
+    const img = g.getImageData(0, 0, c.width, c.height);
+    embed(img, when);
+    g.putImageData(img, 0, 0);
+    // PNG keeps every pixel exactly, so the pixel layer survives in the album.
+    const blob = await new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error())), "image/png"));
+    const file = new File([blob], `NoFakeCam_${stamp(when)}.png`, { type: "image/png" });
+    return { url: URL.createObjectURL(blob), file, saved: false };
+  };
+
+  /** Save where this platform can: app → photo library, Android web → download, iOS web → share sheet. */
+  const deliver = async (shot: Shot) => {
+    if (isNative()) {
+      try {
+        await saveToLibrary(shot);
+        shot.saved = true;
+      } catch {
+        setError(t.saveFail);
+      }
+    } else if (isAndroid()) {
+      download(shot);
+      shot.saved = true;
+    } else {
+      shot.saved = await shareToPhotos(shot); // usually needs a fresh tap on iOS → falls back to the button
+    }
+  };
+
+  const process = async (src: Blob, when: Date) => {
+    setBusy(t.working);
+    await nextFrame();
+    try {
+      const shot = await watermark(src, when);
+      await deliver(shot);
+      setView({ kind: "shot", shot });
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : t.loadFail);
+      setView({ kind: "home" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Web: a photo from the phone's camera app (file input with `capture`). */
   const shoot = async (f: File | undefined) => {
     if (!f) return;
     setError(null);
@@ -171,38 +252,14 @@ export default function WatermarkCamera() {
       setError(t.notFresh);
       return;
     }
-    const when = new Date();
-    setBusy(t.working);
-    await nextFrame();
-    try {
-      const bmp = await createImageBitmap(f); // applies EXIF orientation
-      const s = Math.min(1, Math.sqrt(MAX_PIXELS / (bmp.width * bmp.height)));
-      const c = document.createElement("canvas");
-      c.width = Math.round(bmp.width * s);
-      c.height = Math.round(bmp.height * s);
-      if (c.width * c.height < MIN_PIXELS) throw new Error(t.tooSmall);
-      const g = ctx2d(c);
-      g.drawImage(bmp, 0, 0, c.width, c.height);
-      bmp.close();
-      const img = g.getImageData(0, 0, c.width, c.height);
-      embed(img, when);
-      g.putImageData(img, 0, 0);
-      // PNG keeps every pixel exactly, so the pixel layer survives in the album.
-      const blob = await new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error())), "image/png"));
-      const file = new File([blob], `NoFakeCam_${stamp(when)}.png`, { type: "image/png" });
-      const shot: Shot = { url: URL.createObjectURL(blob), file, saved: false };
-      if (isAndroid()) {
-        download(shot);
-        shot.saved = true;
-      } else {
-        shot.saved = await shareToPhotos(shot); // usually needs a fresh tap on iOS → falls back to the button
-      }
-      setView({ kind: "shot", shot });
-    } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : t.loadFail);
-    } finally {
-      setBusy(null);
-    }
+    await process(f, new Date());
+  };
+
+  /** App: our own full-screen camera (no "Use Photo" step); the web uses the phone's camera app. */
+  const openCamera = () => {
+    setError(null);
+    if (isNative()) setView({ kind: "camera" });
+    else cameraRef.current?.click();
   };
 
   /** Verify the bundled sample photo (watermarked with this app) so the check screen can be tried right away. */
@@ -239,7 +296,13 @@ export default function WatermarkCamera() {
   };
 
   const save = async (shot: Shot) => {
-    if (isAndroid()) download(shot);
+    if (isNative()) {
+      try {
+        await saveToLibrary(shot);
+      } catch {
+        setError(t.saveFail);
+      }
+    } else if (isAndroid()) download(shot);
     else if (!(await shareToPhotos(shot))) download(shot); // desktop / browsers without file sharing
   };
 
@@ -300,6 +363,19 @@ export default function WatermarkCamera() {
       </div>
       {cameraInput}
 
+      {view.kind === "camera" && (
+        <NativeCamera
+          labels={{ shutter: t.shoot, close: t.close, flip: t.flip, working: t.working }}
+          busy={!!busy}
+          onClose={() => setView({ kind: "home" })}
+          onFail={() => {
+            setError(t.camFail);
+            setView({ kind: "home" });
+          }}
+          onCapture={(blob, when) => process(blob, when)}
+        />
+      )}
+
       {view.kind === "home" && (
         <>
           <p className="mt-2 text-base font-bold text-slate-800">{t.tagline}</p>
@@ -329,7 +405,7 @@ export default function WatermarkCamera() {
           </p>
           {/* Pinned to the bottom so the shutter is on the first screen even on small phones. */}
           <div className="sticky bottom-0 -mx-5 mt-auto grid grid-cols-2 gap-2.5 bg-slate-50/95 px-5 pt-3 pb-4 backdrop-blur">
-            <button onClick={() => cameraRef.current?.click()} disabled={!!busy} className={`${primary} gap-1.5`}>
+            <button onClick={openCamera} disabled={!!busy} className={`${primary} gap-1.5`}>
               <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
                 <path d="M4 7h3l2-3h6l2 3h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z" />
                 <circle cx="12" cy="13" r="4" />
@@ -347,7 +423,7 @@ export default function WatermarkCamera() {
           <img src={view.shot.url} alt="" className="w-full rounded-2xl border border-slate-200 [-webkit-touch-callout:default]" />
           {view.shot.saved ? (
             <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-800">
-              ✓ {isAndroid() ? t.savedAndroid : t.saveIosHint}
+              ✓ {isNative() ? t.savedApp : isAndroid() ? t.savedAndroid : t.saveIosHint}
             </p>
           ) : (
             <p className="mt-3 text-xs text-slate-500">{t.saveIosHint}</p>
@@ -356,7 +432,7 @@ export default function WatermarkCamera() {
             <button onClick={() => save(view.shot)} className={view.shot.saved ? ghost : primary}>
               {view.shot.saved ? t.saveAgain : t.saveIos}
             </button>
-            <button onClick={() => cameraRef.current?.click()} className={view.shot.saved ? primary : ghost}>
+            <button onClick={openCamera} className={view.shot.saved ? primary : ghost}>
               {t.again}
             </button>
             <button onClick={() => setView({ kind: "home" })} className="w-full py-2 text-sm text-slate-500">
@@ -606,5 +682,105 @@ function SamplePreview({ badge, cta }: { badge: string; cta: string }) {
         {cta}
       </span>
     </span>
+  );
+}
+
+/**
+ * App-only full-screen camera. The native preview sits behind a transparent web view, so the shutter and
+ * other controls here are ordinary HTML on top of it.
+ */
+function NativeCamera({
+  labels,
+  busy,
+  onClose,
+  onFail,
+  onCapture,
+}: {
+  labels: { shutter: string; close: string; flip: string; working: string };
+  busy: boolean;
+  onClose: () => void;
+  onFail: () => void;
+  onCapture: (blob: Blob, when: Date) => void;
+}) {
+  const [ready, setReady] = useState(false);
+  const capturing = useRef(false);
+  const failRef = useRef(onFail);
+  useEffect(() => {
+    failRef.current = onFail;
+  }, [onFail]);
+
+  useEffect(() => {
+    let stopped = false;
+    const root = document.documentElement;
+    root.classList.add("camera-on");
+    (async () => {
+      try {
+        const { CameraPreview } = await import("@capacitor-community/camera-preview");
+        await CameraPreview.start({
+          position: "rear",
+          toBack: true,
+          disableAudio: true,
+          enableHighResolution: true,
+          rotateWhenOrientationChanged: false,
+          width: window.screen.width,
+          height: window.screen.height,
+        });
+        if (stopped) await CameraPreview.stop();
+        else setReady(true);
+      } catch {
+        if (!stopped) failRef.current();
+      }
+    })();
+    return () => {
+      stopped = true;
+      root.classList.remove("camera-on");
+      import("@capacitor-community/camera-preview").then(({ CameraPreview }) => CameraPreview.stop().catch(() => {}));
+    };
+  }, []);
+
+  const shutter = async () => {
+    if (capturing.current || !ready) return;
+    capturing.current = true;
+    const when = new Date();
+    try {
+      const { CameraPreview } = await import("@capacitor-community/camera-preview");
+      const { value } = await CameraPreview.capture({ quality: 95 });
+      const blob = await (await fetch(`data:image/jpeg;base64,${value}`)).blob();
+      onCapture(blob, when);
+    } catch {
+      capturing.current = false;
+      failRef.current();
+    }
+  };
+
+  const flip = async () => {
+    const { CameraPreview } = await import("@capacitor-community/camera-preview");
+    await CameraPreview.flip().catch(() => {});
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end">
+      {busy && (
+        <div className="absolute inset-0 grid place-items-center bg-black/70">
+          <p className="animate-pulse text-sm font-bold text-white">{labels.working}</p>
+        </div>
+      )}
+      <div className="relative flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent px-8 pt-10 pb-[max(env(safe-area-inset-bottom),24px)]">
+        <button onClick={onClose} className="w-14 text-sm font-bold text-white">
+          {labels.close}
+        </button>
+        <button
+          onClick={shutter}
+          disabled={!ready || busy}
+          aria-label={labels.shutter}
+          className="grid h-20 w-20 place-items-center rounded-full border-4 border-white bg-white/25 active:scale-95 disabled:opacity-50"
+        >
+          <span className="h-16 w-16 rounded-full bg-white" />
+        </button>
+        <button onClick={flip} className="w-14 text-sm font-bold text-white">
+          {labels.flip}
+        </button>
+      </div>
+    </div>
   );
 }

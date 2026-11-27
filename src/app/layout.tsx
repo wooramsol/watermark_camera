@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   openGraph: { type: "website", locale: "ko_KR", siteName: "NoFakeCam 위조방지 카메라", title, description },
 };
 
-export const viewport: Viewport = { themeColor: "#0f172a" };
+export const viewport: Viewport = { themeColor: "#0f172a", viewportFit: "cover" };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

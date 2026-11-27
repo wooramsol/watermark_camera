@@ -12,3 +12,9 @@ body {
   font-family: var(--font-sans);
 }
 
+
+/* App camera: the native preview is behind the web view, so the page must be see-through while it's open. */
+html.camera-on,
+html.camera-on body {
+  background: transparent !important;
+}

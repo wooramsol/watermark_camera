@@ -6,14 +6,21 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "ios": "next build && cap sync ios && cap open ios",
+    "cap:sync": "next build && cap sync"
   },
   "dependencies": {
+    "@capacitor-community/camera-preview": "^8.0.2",
+    "@capacitor-community/media": "^9.1.0",
+    "@capacitor/core": "^8.6.3",
+    "@capacitor/ios": "^8.6.3",
     "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
