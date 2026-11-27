@@ -17,7 +17,12 @@ const L = {
       ["공유", "카톡·문자로 보내거나 크기를 줄이고 잘라도 무늬가 남아요."],
       ["확인", "이 앱으로 찍은 진짜 사진인지, 언제 찍었는지 보여줘요. 편집된 부분은 무늬가 비어 보여요."],
     ],
-    uses: "중고거래 실물 인증 · 현장·사고 사진 · 인증샷",
+    usesTitle: "이럴 때 쓰세요",
+    uses: [
+      ["중고거래", "실물 인증"],
+      ["현장·사고", "증거 사진"],
+      ["인증샷", "운동·출근·리뷰"],
+    ],
     privacy: "사진은 서버로 전송되지 않고 휴대폰 안에서만 처리돼요.",
     shoot: "촬영하기",
     check: "사진 확인하기",
@@ -59,7 +64,12 @@ const L = {
       ["Share", "It survives messengers, resizing and cropping."],
       ["Check", "See whether a photo was taken with this app and when. Edited areas show up as gaps in the pattern."],
     ],
-    uses: "Marketplace listings · On-site & accident photos · Proof shots",
+    usesTitle: "Great for",
+    uses: [
+      ["Marketplace", "Real item proof"],
+      ["Site & accident", "Evidence photos"],
+      ["Proof shots", "Workout, work, reviews"],
+    ],
     privacy: "Photos never leave your phone — nothing is uploaded.",
     shoot: "Take photo",
     check: "Check a photo",
@@ -94,6 +104,40 @@ const L = {
 };
 
 type Locale = keyof typeof L;
+
+const USE_STYLE = [
+  { card: "border-sky-100 bg-sky-50", icon: "bg-sky-500 text-white" },
+  { card: "border-amber-100 bg-amber-50", icon: "bg-amber-500 text-white" },
+  { card: "border-emerald-100 bg-emerald-50", icon: "bg-emerald-500 text-white" },
+];
+const icon = (d: React.ReactNode) => (
+  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    {d}
+  </svg>
+);
+const USE_ICONS = [
+  // shopping bag
+  icon(
+    <>
+      <path d="M6 7h12l1 13H5L6 7z" />
+      <path d="M9 7a3 3 0 0 1 6 0" />
+    </>,
+  ),
+  // warning triangle
+  icon(
+    <>
+      <path d="M12 4 2.5 20h19L12 4z" />
+      <path d="M12 10v4M12 17h.01" />
+    </>,
+  ),
+  // badge check
+  icon(
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m8 12 3 3 5-6" />
+    </>,
+  ),
+];
 const noop = () => () => {};
 /** Browser language on the client, Korean on the server (so hydration matches the server HTML first). */
 const browserLocale = (): Locale => (navigator.language.toLowerCase().startsWith("ko") ? "ko" : "en");
@@ -294,7 +338,16 @@ export default function WatermarkCamera() {
               </li>
             ))}
           </ol>
-          <p className="mt-4 text-xs text-slate-500">{t.uses}</p>
+          <p className="mt-5 text-xs font-bold text-slate-500">{t.usesTitle}</p>
+          <ul className="mt-2 grid grid-cols-3 gap-2">
+            {t.uses.map(([h, d], i) => (
+              <li key={h} className={`rounded-2xl border p-3 ${USE_STYLE[i].card}`}>
+                <span className={`grid h-8 w-8 place-items-center rounded-xl ${USE_STYLE[i].icon}`}>{USE_ICONS[i]}</span>
+                <p className="mt-2 text-[13px] leading-tight font-bold text-slate-900">{h}</p>
+                <p className="mt-0.5 text-[11px] leading-snug text-slate-500">{d}</p>
+              </li>
+            ))}
+          </ul>
           <p className="mt-2 flex items-center gap-1.5 text-xs font-bold text-emerald-700">
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
               <rect x="5" y="11" width="14" height="10" rx="2" />
