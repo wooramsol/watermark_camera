@@ -543,8 +543,40 @@ function PatternCanvas({ cells }: { cells: Float32Array }) {
  * Home-screen sample: the real watermarked sample photo, with the app pattern drawn on top and slowly swept in
  * and out. The real cells are 1/256 of the photo — far too fine to see — so they are drawn magnified.
  */
+/** Reveal fraction over one 6 s cycle: wait, sweep in, hold, sweep out (eased). */
+function revealAt(t: number) {
+  const ease = (x: number) => 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, x)));
+  if (t < 0.12) return 0;
+  if (t < 0.45) return ease((t - 0.12) / 0.33);
+  if (t < 0.62) return 1;
+  if (t < 0.95) return 1 - ease((t - 0.62) / 0.33);
+  return 0;
+}
+
 function SamplePreview({ badge, cta }: { badge: string; cta: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const lineRef = useRef<HTMLSpanElement>(null);
+  // Driven from JS, not CSS: iOS Safari doesn't always repaint a CSS-animated clip-path on a canvas.
+  useEffect(() => {
+    let raf = 0;
+    const tick = (now: number) => {
+      const p = revealAt((now % 6000) / 6000);
+      const clip = `inset(0 ${(1 - p) * 100}% 0 0)`;
+      const c = ref.current;
+      const line = lineRef.current;
+      if (c) {
+        c.style.clipPath = clip;
+        c.style.setProperty("-webkit-clip-path", clip);
+      }
+      if (line) {
+        line.style.left = `${p * 100}%`;
+        line.style.opacity = p > 0.01 && p < 0.99 ? "1" : "0";
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
   useEffect(() => {
     const c = ref.current;
     if (!c) return;
@@ -564,8 +596,16 @@ function SamplePreview({ badge, cta }: { badge: string; cta: string }) {
     <span className="relative block aspect-[3/2] w-full bg-slate-100">
       {/* eslint-disable-next-line @next/next/no-img-element -- small static sample, no optimisation needed */}
       <img src={SAMPLE_URL} alt="" className="absolute inset-0 h-full w-full object-cover" />
-      <canvas ref={ref} className="sample-reveal pointer-events-none absolute inset-0 h-full w-full" />
-      <span className="sample-line pointer-events-none absolute inset-y-0 w-0.5 bg-white/90 shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
+      <canvas
+        ref={ref}
+        style={{ clipPath: "inset(0 100% 0 0)" }}
+        className="pointer-events-none absolute inset-0 h-full w-full"
+      />
+      <span
+        ref={lineRef}
+        style={{ left: 0, opacity: 0 }}
+        className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-white/90 shadow-[0_0_8px_rgba(255,255,255,0.9)]"
+      />
       <span className="absolute top-2.5 left-2.5 rounded-full bg-emerald-600/90 px-2.5 py-1 text-[11px] font-bold text-white">
         ✓ {badge}
       </span>
